@@ -1,0 +1,267 @@
+//Made by Bryn Wiley
+//May 2020
+
+
+
+//HELPER FUNCTIONS -----------------------------------------------------------------------------------
+
+//Gives the euclidian distance between two vectors to the power of k
+//REQUIRES: two numeric vectors of the same dimensionality, k to be a numeric value previously defined globally
+//EFFECTS: returns the euclidian distance between the two vectors to the power of k
+function (numeric)EuclideanDistanceToK(numeric a, numeric b){
+	c=a-b;
+	distance = (sum(c^2))^k;
+	return distance;
+}
+
+
+//returns the fitness of an individual within a given sphere 
+//z must be a vector, with element [a] being the ath trait value of a given phenotype sphere
+//o must be a vector, with element [a] being the ath optimum trait value of the same given phenotype sphere
+
+//REQUIRES: z and o to be numeric vectors of the same dimensionality, z representing the trait vector in a given sphere of an individual,
+//and o representing the optimum trait vector of the same sphere
+//EFFECTS: returns the fitness value of the individual in the given sphere
+function (numeric)fitnessFunction(numeric z, numeric o){
+	fitness = exp(-q*EuclideanDistanceToK(z,o));
+	return fitness;
+}
+
+//returns the fitnesses of a vector of individuals calculated using all spheres, given a matrix of
+//optimum trait values
+
+//REQUIRES: a vector of individuals, and a matrix of optimum values for all spheres in the simulation,
+//with entries [sphere, trait]. The individuals must have mutations with a deltaZ value of a numeric vector
+//of the same dimensionality as the sphere dimensionality
+//EFFECTS: a vector of fitnesses corresponding to the fitness values of all individuals
+function (numeric)getFitness(object<Individual> inds, numeric optimum) {
+	fitnesses = NULL;
+	for (ind in inds) {
+		fitness = 1.0;
+		for (mutType in sim.mutationTypes){
+			Z = rep(0,n);
+			for (mutation in ind.genome1.mutationsOfType(mutType)){
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			for (mutation in ind.genome2.mutationsOfType(mutType)){
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			
+			for (sub in sim.substitutions[sim.substitutions.mutationType == mutType]){
+				Z = Z + sub.getValue("deltaZ");
+			}
+			fitness = fitness * fitnessFunction(Z, drop(optimum[mutType.id-1, ]));
+		}
+		fitnesses = c(fitnesses, fitness);
+	}
+	return fitnesses;
+}
+
+function (numeric)getFixedFitness(numeric optimum){
+	fitness = 1.0;
+	for (mutType in sim.mutationTypes){
+		Z = rep(0,n);
+		for (sub in sim.substitutions[sim.substitutions.mutationType == mutType]){
+				Z = Z + sub.getValue("deltaZ");
+		}
+		fitness = fitness * fitnessFunction(Z, drop(optimum[mutType.id-1, ]));
+	}
+	return fitness;
+}
+
+//determines and assigns the fitness of all individuals in a subpopulation with a given a set of optimum vectors
+
+//REQUIRES: a subpopulation of individuals, and a matrix of optimum values for all spheres in the simulation,
+//with entries [sphere,trait]. The individuals must have mutations with a deltaZ value of a numeric vector
+//of the same dimensionality as the sphere dimensionality
+//MODIFIES: the individuals in the subpopulation have their fitnessScaling property assigned according to Fisher's 
+//geometric model
+function(void)assignFisherFitness(object<Subpopulation> subpop, numeric optimum){
+	subpop.individuals.fitnessScaling = getFitness(subpop.individuals, optimum);
+}
+
+//sets the delta z of each mutation
+//This is a callback that is called whenever a mutation is created
+s12 mutation() {
+	xi = rnorm(n);
+	r= rexp(1,lambda);
+	deltaZ = xi*r/sqrt(sum(xi^2));
+	mut.setValue("deltaZ", deltaZ);
+	return T;
+}
+
+
+//FUNCTIONS TO RUN THE SIMULATION-------------------------------------------------------------------------
+initialize() {
+	if(!exists("m")){
+		defineConstant("m",1); //number of spheres
+	}
+	if(!exists("n")){
+		defineConstant("n",10); //number of traits per sphere
+	}
+	if(!exists("q")){
+		defineConstant("q",1.0); //strength of selection
+	}
+	if(!exists("k")){
+		defineConstant("k",2.0); //degree of epistasis
+	}
+	if(!exists("N")){
+		defineConstant("N",2000); //size of each population
+	}
+	if(!exists("mutationRate")){
+		defineConstant("mutationRate", 5e-9); //mutation rate
+	}
+	if(!exists("recombinationRate")){
+		defineConstant("recombinationRate", 1e-8); //recombination rate
+	}
+	if(!exists("lambda")){
+		defineConstant("lambda", 0.04); //lambda for mutation effect size
+	}
+	if(!exists("tau1")){
+		defineConstant("tau1", 100); //generation at which the optimum starts moving (if desired)
+	}
+	if(!exists("tau2")){
+		defineConstant("tau2", 150); //generation at which the optimum stops moving (if desired)
+	}
+	if(!exists("run_number")){
+		defineConstant("run_number", 0);
+	}
+	if(!exists("genome_size")){
+		defineConstant("genome_size",999);
+	}
+	
+	defineConstant("start",clock());
+	
+	//optimums for populations 1 and 2 are matrices, with indices [sphere,trait value]
+	//the F1 and F2 populations use the p1 optimum
+	op1 = matrix(rep(0.0,n*m),nrow=m);
+		
+	//optimum points after movement (if desired)
+	nextOp1 = matrix(rep(0.0,n*m),nrow=m);
+	
+	
+	//setting the optimums
+	//NOTE: Final calculation of fitnesses are done using final optimums
+	//if the optimum does not change in the scenario, initialOptimum should equal final Optimum
+	op1[,0]=2.0;
+	
+	nextOp1[,0]=2.0;
+	
+	defineConstant("initialOptimum1", op1); //initial optimums for subpopulation 1
+	defineConstant("finalOptimum1", nextOp1); //final optimums for subpopulation 1
+	
+	
+	
+	//initial phenotypes for both populations assumed to be the origin
+	
+	//initialize other rsimulation parameters
+	//mutations in different spheres are represented as different mutation types
+	initializeMutationRate(mutationRate);
+	mutationTypes = NULL;
+	for (i in 1:m){
+		initializeMutationType("m" + i,0.5,"f",0.0);
+		executeLambda("mutationTypes = c(mutationTypes,m" + i + ");");
+	}
+	initializeGenomicElementType("g1",mutationTypes,rep(1.0,m));
+	initializeGenomicElement(g1,0,genome_size);
+	initializeRecombinationRate(recombinationRate);
+}
+
+//start the simulation
+1 {
+	sim.addSubpop("p1", N);
+	sim.setValue("fixed_fitness",getFixedFitness(initialOptimum1));
+	sim.setValue("num_substitutions",0);
+	sim.setValue("end_fixations",-1);
+}
+
+//normal calculation of fitness
+s11 1:999999999 late() {
+	optimum1 = initialOptimum1; //p1 optimum
+	if (sim.generation>tau1 & sim.generation <=tau2){//Are we moving the optimum?
+		optimum1= initialOptimum1 + ((finalOptimum1 - initialOptimum1)/(tau2-tau1))*(sim.generation-tau1);
+	} else if (sim.generation > tau2) { //Is the optimum finished moving?
+		optimum1 = finalOptimum1;
+	}
+	
+	assignFisherFitness(p1,optimum1);
+		
+	if(sim.generation % 1000 == 0){
+		cat(sim.generation + "th generation! Mean fitness:" + mean(p1.individuals.fitnessScaling));
+		catn();
+	}
+	
+	finished = F;
+	
+	if(sim.getValue("end_fixations")<0){
+		if(size(sim.substitutions)>sim.getValue("num_substitutions")){
+			sim.setValue("num_substitutions",size(sim.substitutions));
+			cat("FIXED! Fixed fitness:" + getFixedFitness(optimum1) + " num fixed: "+size(sim.substitutions));
+			catn();
+			if(getFixedFitness(optimum1)<sim.getValue("fixed_fitness")){
+				sim.setValue("end_fixations",size(sim.substitutions)*2);
+			} else {
+				sim.setValue("fixed_fitness",getFixedFitness(optimum1));
+			}
+		}
+	} else if(size(sim.substitutions)==sim.getValue("end_fixations")){
+		finished=T;
+	}
+	
+	if(finished){
+		cat("DONE!");
+		mutationFile = "mutations" + run_number+ ".csv";
+		writeFile(mutationFile, "id,position,sphere,"+paste(1:n,sep=","));
+		for(mut in c(sim.mutations)){
+			writeFile(mutationFile,paste(c(mut.id,mut.position,mut.mutationType.id,mut.getValue("deltaZ")),sep=","),T);
+		}
+		
+		for(mut in c(sim.substitutions)){
+			writeFile(mutationFile,paste(c(mut.id,mut.position,mut.mutationType.id,mut.getValue("deltaZ")),sep=","),T);
+		}
+		
+		
+		individualFile = "individuals" + run_number+ ".csv";
+		writeFile(individualFile,paste(c(sim.mutations.id,sim.substitutions.id),sep=","));
+		for(ind in sim.subpopulations.individuals){
+			toWrite = "";
+			for (mut in c(sim.mutations)){
+				if(ind.genome1.containsMutations(mut) & ind.genome2.containsMutations(mut)){
+					toWrite = toWrite+"3,";
+				} else if(ind.genome1.containsMutations(mut)){
+					toWrite = toWrite+"1,";
+				} else if(ind.genome2.containsMutations(mut)){
+					toWrite = toWrite+"2,";
+				} else {
+					toWrite = toWrite+"0,";
+				}
+			}
+			toWrite = toWrite+paste(rep(3,length(sim.substitutions)),sep=",");
+			writeFile(individualFile,toWrite,T);
+		}
+		
+		parametersFile = "parameters" + run_number+ ".csv";
+		trait_names1 = NULL;
+		trait_values1 = NULL;
+		trait_values2 = NULL;
+		trait_names2 = NULL;
+		for(i in 1:m){
+			for(j in 1:n){
+				trait_names1 = c(trait_names1, "Initial_sphere"+i+"_Initial_trait"+j);
+				trait_values1 = c(trait_values1, initialOptimum1[i-1,j-1]);
+			}
+		}
+		for(i in 1:m){
+			for(j in 1:n){
+				trait_names2 = c(trait_names2, "Final_sphere"+i+"_Final_trait"+j);
+				trait_values2 = c(trait_values2, finalOptimum1[i-1,j-1]);
+			}
+		}
+		writeFile(parametersFile,"run_number,genome_size,m,n,N,lambda,tau1,tau2,mutation_rate,recombination_rate,mean_fitness,generations,fixations,time,"+paste(trait_names1, sep=",")+","+paste(trait_names2,sep=","));
+		writeFile(parametersFile,paste(c(run_number,genome_size,m,n,N,lambda,tau1,tau2,mutationRate,recombinationRate,mean(p1.individuals.fitnessScaling),sim.generation,size(sim.substitutions),(clock()-start),trait_values1,trait_values2),sep=","),T);
+		sim.simulationFinished();
+		
+	}
+}
+
+
