@@ -1,0 +1,202 @@
+//HELPER FUNCTIONS -----------------------------------------------------------------------------------
+//Records the fitness of a vector of individuals given an optimum, along with the number of homozygous mutations in
+//each individual that were originally heterozygous to some degree in the original populations, and the two
+//run numbers of the populations that created the hybrids
+function (void)writeFitness(object<Individual> inds, string population){
+	if(!fileExists(output_file)){
+		writeFile(output_file, "population,fitness,num_double_heterozygous,run_number1,run_number2");
+	}
+	
+	//Find which mutations are heterozygous in the original populations
+	p1muts = sim.mutations[sim.mutations.subpopID == 1];
+	p2muts = sim.mutations[sim.mutations.subpopID == 2];
+	p1freqs = sim.mutationFrequencies(p1,p1muts);
+	p2freqs = sim.mutationFrequencies(p2,p2muts);
+	het_muts=c(p1muts[p1freqs < 1.0], p2muts[p2freqs < 1.0]);
+		
+	for (ind in inds){
+		fit = getFitness(ind);
+		num_double_heterozygous = sum((ind.genome1.containsMutations(het_muts) & ind.genome2.containsMutations(het_muts)));
+		writeFile(output_file,paste(c(
+			population,
+			fit,
+			num_double_heterozygous,
+			run_number1,
+			run_number2),sep=","),T);
+	}
+}
+//Gives the euclidian distance between two vectors to the power of k
+//REQUIRES: two numeric vectors of the same dimensionality, k to be a numeric value previously defined globally
+//EFFECTS: returns the euclidian distance between the two vectors to the power of k
+function (numeric)EuclideanDistanceToK(numeric a, numeric b){
+	c=a-b;
+	distance = (sum(c^2))^k;
+	return distance;
+}
+
+
+//returns the fitness of an individual within a given sphere 
+//z must be a vector, with element [a] being the ath trait value of a given phenotype sphere
+//o must be a vector, with element [a] being the ath optimum trait value of the same given phenotype sphere
+
+//REQUIRES: z and o to be numeric vectors of the same dimensionality, z representing the trait vector in a given sphere of an individual,
+//and o representing the optimum trait vector of the same sphere
+//EFFECTS: returns the fitness value of the individual in the given sphere
+function (numeric)fitnessFunction(numeric z, numeric o){
+	fitness = exp(-q*EuclideanDistanceToK(z,o));
+	return fitness;
+}
+
+//returns the fitnesses of a vector of individuals calculated using all spheres, given a matrix of
+//optimum trait values
+
+//REQUIRES: a vector of individuals, and a matrix of optimum values for all spheres in the simulation,
+//with entries [sphere, trait]. The individuals must have mutations with a deltaZ value of a numeric vector
+//of the same dimensionality as the sphere dimensionality
+//EFFECTS: a vector of fitnesses corresponding to the fitness values of all individuals
+function (numeric)getFitness(object<Individual> inds) {
+	fitnesses = NULL;
+	for (ind in inds) {
+		fitness = 1.0;
+		for (mutType in sim.mutationTypes){
+			Z = rep(0,n);
+			for (mutation in ind.genome1.mutationsOfType(mutType)){	
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			for (mutation in ind.genome2.mutationsOfType(mutType)){
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			for (sub in sim.substitutions[sim.substitutions.mutationType == mutType]){
+				Z = Z + sub.getValue("deltaZ");
+			}
+			fitness = fitness * fitnessFunction(Z, drop(optimum[mutType.id-1, ]));
+		}
+		fitnesses = c(fitnesses, fitness);
+	}
+	return fitnesses;
+}
+
+
+
+initialize() {
+	initializeSLiMModelType("nonWF");
+	
+	if(!exists("q")){
+		defineConstant("q",1.0); //strength of selection
+	}
+	if(!exists("k")){
+		defineConstant("k",2.0); //degree of epistasis
+	}
+	if(!exists("m")){
+		defineConstant("m",1); //number of spheres
+	}
+	if(!exists("n")){
+		defineConstant("n",5); //number of traits per sphere
+	}
+	if(!exists("N")){
+		defineConstant("N",1000); //size of each population
+	}
+	if(!exists("run_number1")){
+		defineConstant("run_number1", 0.1); //the run number of the first population
+	}
+	if(!exists("run_number2")){
+		defineConstant("run_number2",0.2); //the run number of the second population
+	}
+	defineConstant("output_file", "fitnesses.csv"); //the output file for the fitness and other information
+	if(!exists("genome_size")){ 
+		defineConstant("genome_size",1000); //size of the genome
+	}
+	if(!exists("recombinationRate")){ 
+		defineConstant("recombinationRate", 0.001); //recombination rate
+	}
+	
+	
+	
+	//initialize other parameters
+	mutationTypes = NULL;
+	for (i in 1:m){
+		initializeMutationType("m" + i,0.5,"f",0.0);
+		executeLambda("mutationTypes = c(mutationTypes,m" + i + ");");
+		executeLambda("m"+i+".mutationStackPolicy="+"\"f\";");
+		executeLambda("m"+i+".convertToSubstitution=F;");
+	}
+	initializeGenomicElementType("g1",mutationTypes,rep(1.0,m));
+	initializeGenomicElement(g1,0,genome_size-1);
+	initializeRecombinationRate(recombinationRate);
+	initializeMutationRate(0);
+	
+	//optimums are matrices, with indices [sphere,trait value]
+	op = matrix(rep(0.0,n*m),nrow=m);
+	
+	
+	//setting the optimums
+	op[,0]=2.0;
+	defineConstant("optimum", op);
+}
+2 reproduction() {
+	//generate F1
+	p3parents = sample(p1.individuals, p1.individualCount);
+	for (i in seq(0, p2.individualCount - 1)){
+		p3.addCrossed(p3parents[i], p2.individuals[i]);
+	}
+	self.active = 0;
+}
+
+3 reproduction() {
+//generate F2
+	p4parents = sample(p3.individuals, p3.individualCount);
+	for (i in seq(0, p3.individualCount - 1)){
+		p4.addCrossed(p4parents[i],p3.individuals[i]);
+	}
+	
+//generate BC
+	p5parents = sample(p3.individuals, p3.individualCount);
+	for (i in seq(0, p1.individualCount - 1)){
+		p5.addCrossed(p5parents[i], p1.individuals[i]);
+	}
+	self.active=0;
+}
+
+
+1 early() {
+   //set up populations
+	sim.addSubpop("p1",N);
+	sim.addSubpop("p2",N);
+	sim.addSubpop("p3",0);
+	sim.addSubpop("p4",0);
+	sim.addSubpop("p5",0);
+	p1.genomes.readFromVCF("vcf"+run_number1+".dat");
+	p2.genomes.readFromVCF("vcf"+run_number2+".dat");
+	linesp1=readFile("mutationInfo"+run_number1+".csv");
+	linesp1=linesp1[1:(size(linesp1)-1)]; //remove csv header
+	linesp2=readFile("mutationInfo"+run_number2+".csv");
+	linesp2=linesp2[1:(size(linesp2)-1)]; //remove csv header
+	for (line in linesp1){
+		fields = strsplit(line, ",");
+		pos = asInteger(fields[0]);
+		deltaZ = asFloat(fields[1:n]);
+		p1.genomes.mutations[which(p1.genomes.mutations.position==pos)].setValue("deltaZ",deltaZ);
+		
+	}
+	for (line in linesp2){
+		fields = strsplit(line, ",");
+		pos = asInteger(fields[0]);
+		deltaZ = asFloat(fields[1:n]);
+		p2.genomes.mutations[which(p2.genomes.mutations.position==pos)].setValue("deltaZ",deltaZ);
+	}
+	
+	
+	
+	writeFitness(p1.individuals, "p1"); 
+	writeFitness(p2.individuals, "p2");
+	
+}
+
+2 early(){
+	writeFitness(p3.individuals, "F1");
+}
+
+3 early(){
+	writeFitness(p4.individuals, "F2");
+	writeFitness(p5.individuals, "BC");
+}

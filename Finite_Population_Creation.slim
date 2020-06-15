@@ -1,0 +1,283 @@
+//Made by Bryn Wiley
+//June 2020
+
+
+
+//HELPER FUNCTIONS -----------------------------------------------------------------------------------
+//Returns the averaged heterozygosity (pi) of all individuals in a given population
+//REQUIRES: A valid slim population
+//EFFECTS: Returns the averaged heterozygosity of all individuals
+function(numeric)getHeterozygosity(object<Subpopulation>pop){
+	total = 0.0;
+	for (ind in pop.individuals){
+		muts0 = ind.genomes[0].mutations;
+		muts1 = ind.genomes[1].mutations;
+		shared_count = sum(match(muts0,muts1)>=0);
+		unshared_count = muts0.size() + muts1.size() -2*shared_count;
+		pi_ind = unshared_count/genome_size;
+		total=total+	pi_ind;
+	}
+	
+	pi = total/p1.individuals.size();
+	return pi;
+}
+
+//outputs simulation information information for a given subpopulation
+//REQUIRES: A valid slim population
+//EFFECTS: Outputs all relevant simulation information about a population, including the individual
+//genomes, the relevant mutation information, and select simulation parameters
+function(void)OutputInfo(object<Subpopulation>pop){
+	for (mut in sim.mutations[sim.mutations.subpopID==pop.id]){
+		fileName = "mutationInfo"+runNumber+"."+pop.id+".csv";
+		if(!fileExists(fileName)){
+			writeFile(fileName,paste(c(
+				"position",
+				rep("trait",n)+1:n,
+				"origin_generation",
+				"frequency"), sep=",")
+				);
+		}
+		
+		freq=sim.mutationFrequencies(pop,mut);
+		writeFile(fileName,paste(c(
+			mut.position,
+			paste(mut.getValue("deltaZ"),sep=","),
+			mut.originGeneration,
+			sim.mutationFrequencies(pop,mut)),sep=","),T
+			);
+	}
+	pop.outputVCFSample(N,filePath="vcf"+runNumber+"."+pop.id+".dat");
+	if(!fileExists("experiment.csv")){
+		writeFile("experiment.csv",paste(c(
+			"run",
+			"lambda",
+			"N",
+			"genome_size",
+			"m",
+			"n",
+			"mutation_rate",
+			"recombination_rate",
+			"generation_finished",
+			"gens_heterozygous",
+			"mean_fitness",
+			"heterozygosity"),sep=",")
+			);
+	}
+	writeFile("experiment.csv",paste(c(
+		runNumber+"."+pop.id,
+		lambda,
+		N,
+		genome_size,
+		m,
+		n,
+		mutationRate,
+		recombinationRate,
+		sim.generation,
+		pop.getValue("gens_heterozygous"),
+		mean(pop.individuals.fitnessScaling),
+		getHeterozygosity(pop)),sep=","),
+		T);
+}
+
+//Creates and prints a library of mutations based on position in the genome for individuals to draw from
+//EFFECTS: Based on pre-defined simulation parameters, returns and also records in a file a constant global matrix where row number
+//(starting from 0) denotes genome position, the first column denotes the multi-dimensional trait sphere the 
+//mutation inhabits, and the rest of the columns denote trait values for all n traits. These traits are created randomly
+//using pre-defined lambda values.
+function(numeric)CreateMutationLibrary(void){
+	fileName = "mutationLibrary"+runNumber+".csv";
+	header = "sphere,"+(paste(rep("traitValue",n)+1:n,sep=","));
+	writeFile(fileName,header);
+	library = matrix(rep(0.0,genome_size*(n+1)),ncol=(n+1));
+	for(i in 0:(genome_size-1)){
+		xi = rnorm(n);
+		r= rexp(1,lambda);
+		deltaZ = xi*r/sqrt(sum(xi^2));
+		sphere=rdunif(1,min=1,max=m);
+		library[i,]=c(sphere,deltaZ);
+		writeFile(fileName,paste(c(sphere,deltaZ),sep=","),T);
+	}
+	return library;
+}
+
+//Gives the euclidian distance between two vectors to the power of k
+//REQUIRES: two numeric vectors of the same dimensionality, k to be a numeric value previously defined globally
+//EFFECTS: returns the euclidian distance between the two vectors to the power of k
+function (numeric)EuclideanDistanceToK(numeric a, numeric b){
+	c=a-b;
+	distance = (sum(c^2))^k;
+	return distance;
+}
+
+
+//returns the fitness of an individual within a given sphere 
+//z must be a vector, with element [a] being the ath trait value of a given phenotype sphere
+//o must be a vector, with element [a] being the ath optimum trait value of the same given phenotype sphere
+//REQUIRES: z and o to be numeric vectors of the same dimensionality, z representing the trait vector in a given sphere of an individual,
+//and o representing the optimum trait vector of the same sphere
+//EFFECTS: returns the fitness value of the individual in the given sphere
+function (numeric)fitnessFunction(numeric z, numeric o){
+	fitness = exp(-q*EuclideanDistanceToK(z,o));
+	return fitness;
+}
+
+//returns the fitnesses of a vector of individuals calculated using all spheres, given a matrix of
+//optimum trait values
+//REQUIRES: a vector of individuals, and a matrix of optimum values for all spheres in the simulation,
+//with entries [sphere, trait]. The individuals must have mutations with a deltaZ value of a numeric vector
+//of the same dimensionality as the sphere dimensionality
+//EFFECTS: a vector of fitnesses corresponding to the fitness values of all individuals
+function (numeric)getFitness(object<Individual> inds, numeric optimum) {
+	fitnesses = NULL;
+	for (ind in inds) {
+		fitness = 1.0;
+		for (mutType in sim.mutationTypes){
+			Z = rep(0,n);
+			for (mutation in ind.genome1.mutationsOfType(mutType)){
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			for (mutation in ind.genome2.mutationsOfType(mutType)){
+				Z = Z + (mutation.getValue("deltaZ"))/2;
+			}
+			for (sub in sim.substitutions[sim.substitutions.mutationType == mutType]){
+				Z = Z + sub.getValue("deltaZ");
+			}
+			fitness = fitness * fitnessFunction(Z, drop(optimum[mutType.id-1, ]));
+		}
+		fitnesses = c(fitnesses, fitness);
+	}
+	return fitnesses;
+}
+
+
+//determines and assigns the fitness of all individuals in a subpopulation with a given a set of optimum vectors
+
+//REQUIRES: a subpopulation of individuals, and a matrix of optimum values for all spheres in the simulation,
+//with entries [sphere,trait]. The individuals must have mutations with a deltaZ value of a numeric vector
+//of the same dimensionality as the sphere dimensionality
+//MODIFIES: the individuals in the subpopulation have their fitnessScaling property assigned according to Fisher's 
+//geometric model
+function(void)assignFisherFitness(object<Subpopulation> subpop, numeric optimum){
+	subpop.individuals.fitnessScaling = getFitness(subpop.individuals, optimum);
+}
+
+//sets the delta z of each mutation. Calls upon a pre-defined library 
+//This is a callback that is called whenever a mutation is created
+s12 mutation() {
+	info = mutation_library[mut.position,];
+	mut.setMutationType(asInteger(info[0]));
+	mut.setValue("deltaZ",info[1:n]);
+	return T;
+}
+
+
+//FUNCTIONS TO RUN THE SIMULATION-------------------------------------------------------------------------
+initialize() {
+	if(!exists("m")){
+		defineConstant("m",1); //number of spheres
+	}
+	if(!exists("n")){
+		defineConstant("n",5); //number of traits per sphere
+	}
+	if(!exists("q")){
+		defineConstant("q",1.0); //strength of selection
+	}
+	if(!exists("k")){
+		defineConstant("k",2.0); //degree of epistasis
+	}
+	if(!exists("N")){
+		defineConstant("N",1000); //size of each population
+	}
+	if(!exists("mutationRate")){
+		defineConstant("mutationRate", 1e-8); //mutation rate
+	}
+	if(!exists("recombinationRate")){
+		defineConstant("recombinationRate", 0.001); //recombination rate
+	}
+	if(!exists("lambda")){
+		defineConstant("lambda", 0.12); //lambda for mutation effect size
+	}
+	if(!exists("tau1")){
+		defineConstant("tau1", 100); //generation at which the optimum starts moving (if desired)
+	}
+	if(!exists("tau2")){
+		defineConstant("tau2", 150); //generation at which the optimum stops moving (if desired)
+	}
+	if(!exists("runNumber")){
+		defineConstant("runNumber", 0);
+	}
+	if(!exists("genome_size")){
+		defineConstant("genome_size",1000);
+	}
+	
+	//initial optimums for populations 1 and 2 are matrices, with indices [sphere,trait value]
+	initialOptimums = matrix(rep(0.0,n*m),nrow=m);
+	
+	//optimum points after movement (if desired)
+	finalOptimums = matrix(rep(0.0,n*m),nrow=m);
+	
+	
+	//Here we set the optimums
+	//NOTE: Final calculation of fitnesses are done using final optimums
+	//if the optimum does not change in the scenario, initialOptimum should equal final Optimum
+	initialOptimums[,0]=2.0;
+	finalOptimums[,0]=2.0;
+	defineConstant("initialOptimum", initialOptimums); 
+	defineConstant("finalOptimum", finalOptimums); 
+	//initial phenotypes for both populations assumed to be the origin
+	
+	//initialize other simulation parameters
+	//mutations in different spheres are represented as different mutation types
+	initializeMutationRate(mutationRate);
+	mutationTypes = NULL;
+	for (i in 1:m){
+		initializeMutationType("m" + i,0.5,"f",0.0);
+		executeLambda("m"+i+".convertToSubstitution=F;");
+		executeLambda("mutationTypes = c(mutationTypes,m" + i + ");");
+		executeLambda("m"+i+".mutationStackPolicy="+"\"f\";");
+	}
+	initializeGenomicElementType("g1",mutationTypes,rep(1.0,m));
+	initializeGenomicElement(g1,0,genome_size-1);
+	initializeRecombinationRate(recombinationRate);
+	defineConstant("mutation_library", CreateMutationLibrary());
+
+}
+
+//start the simulation
+1 {
+	sim.addSubpop("p1", N);
+	sim.addSubpop("p2", N);
+	p1.setValue("gens_heterozygous",0);
+	p2.setValue("gens_heterozygous",0);
+}
+
+
+s11 1:999999999 late() {
+	optimum = initialOptimum; 
+	if (sim.generation>tau1 & sim.generation <=tau2){//Check if the optimum is moving
+		optimum= initialOptimum + ((finalOptimum - initialOptimum)/(tau2-tau1))*(sim.generation-tau1);
+	} else if (sim.generation > tau2) { //Check if the optimum if finished moving
+		optimum = finalOptimum;
+	}
+	
+	for(pop in sim.subpopulations){
+		assignFisherFitness(pop,optimum);
+		freqs=sim.mutationFrequencies(pop);
+		//Check if any mutations are heterozygous. If so, increase the gens_heterozygous counter
+		if(any(freqs[freqs<0.95]>0.05)){
+			pop.setValue("gens_heterozygous",pop.getValue("gens_heterozygous")+1);
+		}
+		
+		//End condition for a population
+		if (all(pop.individuals.fitnessScaling>=(0.1))|sim.generation == 1000000){
+			OutputInfo(pop);
+			pop.setSubpopulationSize(0);
+		}
+	}
+	
+	if(size(sim.subpopulations)==0){
+		sim.simulationFinished();
+	}
+}
+
+
