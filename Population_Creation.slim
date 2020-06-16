@@ -67,7 +67,7 @@ function(void)OutputInfo(object<Subpopulation>pop){
 		getHeterozygosity(pop)),sep=","),
 		T);
 	addSubsBackIn();
-	pop.outputVCFSample(N,filePath="vcf"+runNumber+"."+pop.id+".dat");
+	pop.outputVCFSample(N,filePath="vcf"+runNumber+".dat");
 }
 
 //Gives the euclidian distance between two vectors to the power of k
