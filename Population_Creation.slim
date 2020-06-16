@@ -260,7 +260,7 @@ initialize() {
 	}
 	
 	
-	if (sum(p1.individuals.fitnessScaling>=(0.1))>=900){
+	if (sum(p1.individuals.fitnessScaling>=(1-(1/N)))>=900){
 		OutputInfo(p1);
 		sim.simulationFinished();
 	}
