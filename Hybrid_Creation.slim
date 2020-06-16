@@ -11,11 +11,10 @@ function (void)writeFitness(object<Individual> inds, string population){
 	}
 	
 	//Find which mutations are heterozygous in the original populations
-	p1muts = sim.mutations[sim.mutations.subpopID == 1];
-	p2muts = sim.mutations[sim.mutations.subpopID == 2];
-	p1freqs = sim.mutationFrequencies(p1,p1muts);
-	p2freqs = sim.mutationFrequencies(p2,p2muts);
-	het_muts=c(p1muts[p1freqs < 1.0], p2muts[p2freqs < 1.0]);
+	muts = sim.mutations;
+	p1freqs = sim.mutationFrequencies(p1,muts);
+	p2freqs = sim.mutationFrequencies(p2,muts);
+	het_muts=c(muts[p1freqs >0 & p1freqs < 1.0], muts[p2freqs >0 & p2freqs < 1.0]);
 		
 	for (ind in inds){
 		fit = getFitness(ind);
