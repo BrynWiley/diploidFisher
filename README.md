@@ -1,5 +1,7 @@
 # diploidFisher
 
+NOTE: A couple small bugs have been fixed since upload!
+
 "Population_Creation.slim" and "Finite_Population_Creation.slim" are used to run diploid simulations using Fisher's geometric model. Each simulation should be given a unique identifying "run number", represented as the run_number constant in the slim file.
 
 "Population_Creation.slim" produces three files: a "vcf.dat" file containing genomic information for all individuals in the simulation, a "mutationInfo.csv" file containing the mutational vector for each mutation present at the end of the simulation (alongside other information), and an "experiment" file, which contains a record of the parameters used in the simulation, alongside other end-simulation information. If an "experiment" file already exists in the working directory, the information is instead added as a new line. The vcf and mutationInfo files are numbered based on the run number assigned to the simulation (eg: vcf1.dat and mutationInfo1.csv for run number 1).
