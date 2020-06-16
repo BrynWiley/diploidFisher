@@ -263,7 +263,8 @@ s11 1:999999999 late() {
 	for(pop in sim.subpopulations){
 		assignFisherFitness(pop,optimum);
 		freqs=sim.mutationFrequencies(pop);
-		//Check if any mutations are heterozygous. If so, increase the gens_heterozygous counter
+		//Check if any mutations are heterozygous. If so, increase the gens_heterozygous counter, which represents
+		//the number of generations a simulation spends with at least one heterozygous mutation
 		if(any(freqs[freqs<0.95]>0.05)){
 			pop.setValue("gens_heterozygous",pop.getValue("gens_heterozygous")+1);
 		}
