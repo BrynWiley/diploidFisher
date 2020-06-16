@@ -18,7 +18,7 @@ function(numeric)getHeterozygosity(object<Subpopulation>pop){
 		total=total+	pi_ind;
 	}
 	
-	pi = total/p1.individuals.size();
+	pi = total/pop.individuals.size();
 	return pi;
 }
 
