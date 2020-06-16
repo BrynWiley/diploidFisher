@@ -270,7 +270,7 @@ s11 1:999999999 late() {
 		}
 		
 		//End condition for a population
-		if (all(pop.individuals.fitnessScaling>=(0.1))|sim.generation == 1000000){
+		if (all(pop.individuals.fitnessScaling>=(0.95))|sim.generation == 1000000){
 			OutputInfo(pop);
 			pop.setSubpopulationSize(0);
 		}
