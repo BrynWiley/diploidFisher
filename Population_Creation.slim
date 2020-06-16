@@ -254,12 +254,14 @@ initialize() {
 	
 	assignFisherFitness(p1,optimum);
 	
+	//Check if any mutations are heterozygous. If so, increase the gens_heterozygous counter, which represents
+	//the number of generations a simulation spends with at least one heterozygous mutation
 	freqs=sim.mutationFrequencies(p1);
 	if(any(freqs[freqs <0.95]>0.05)){
 		p1.setValue("gens_heterozygous",p1.getValue("gens_heterozygous")+1);
 	}
 	
-	
+	//End condition for a population
 	if (sum(p1.individuals.fitnessScaling>=(1-(1/N)))>=900){
 		OutputInfo(p1);
 		sim.simulationFinished();
